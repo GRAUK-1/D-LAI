@@ -1,19 +1,14 @@
 import logging
 import cv2
 import numpy as np
-import pyautogui
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from skopt import gp_minimize
-from torch import device
-from torchvision.transforms import ToTensor
 from buffer import ReplayBuffer
 from constants import BUFFER_MAXLEN, EPSILON, EPSILON_DECAY, EPSILON_MIN, OUTPUT_SIZE, BATCH_SIZE
 from preprocessing import preprocess_frame, PLAYER_COLOR
 
 logging.basicConfig(filename='ai.log', level=logging.ERROR)
-
 
 # Initialize the device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -26,7 +21,6 @@ class GettingOverItAI:
         self.loss_function = nn.MSELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.00025)
         self.curiosity_optimizer = optim.Adam(self.curiosity_model.parameters(), lr=0.00025)
-        self.transform = ToTensor()
         self.total_reward = 0.0
         self.previous_position = None
         self.buffer = ReplayBuffer(BUFFER_MAXLEN)
@@ -36,17 +30,6 @@ class GettingOverItAI:
         self.previous_mouse_position = None
         self.previous_position = 0.0
         self.gamma = 0.99  # Discount factor for future rewards
-
-    @staticmethod
-    def get_screen_shot():
-        try:
-            # Capture the entire screen
-            screen = np.array(pyautogui.screenshot())
-            # Convert the image from BGR to RGB color space
-            screen = cv2.cvtColor(screen, cv2.COLOR_BGR2RGB)
-            return screen
-        except Exception as e:
-            logging.error(f'Error capturing screen: {e}')
 
     @staticmethod
     def perform_mouse_movement(action):

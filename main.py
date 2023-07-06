@@ -1,7 +1,5 @@
 import time
 import cv2
-import numpy as np
-import pyautogui
 import pygetwindow as gw
 import torch
 from ai import GettingOverItAI
@@ -10,6 +8,8 @@ from models import SimpleModel, CuriosityModel
 from preprocessing import preprocess_frame
 from buffer import ReplayBuffer
 from torch import optim
+from collections import deque
+import numpy as np
 
 # Initialize the device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -30,45 +30,56 @@ model = SimpleModel(input_shape)
 
 
 def main():
+    # Initialize the curiosity model and AI
     curiosity_model = CuriosityModel()
     ai = GettingOverItAI(model, curiosity_model)
-    replay_buffer = ReplayBuffer(BUFFER_MAXLEN)
 
-    last_save_time = time.time()
+    # Initialize the replay buffer
+    replay_buffer = ReplayBuffer(BUFFER_MAXLEN)
 
     # Define an optimizer
     optimizer = optim.Adam(model.parameters())
 
-    while True:
-        try:
-            # Capture a screenshot of the game
-            game_screen = pyautogui.screenshot(region=(x, y, width, height))
-            game_screen_np = np.array(game_screen)
+    # Initialize the video capture
+    cap = cv2.VideoCapture(GAME_TITLE)
 
-            # Preprocess the game screen
-            preprocessed_screen_np = preprocess_frame(game_screen_np)
+    # Initialize frame stack
+    frame_stack = deque(maxlen=STACK_SIZE)
 
-            # Convert the 12-channels image to multiple 3-channels (RGB) images for visualization
-            for i in range(0, preprocessed_screen_np.shape[2], 3):  # Assume the shape is (height, width, 12)
-                visualization = preprocessed_screen_np[:, :, i:i + 3]  # Take three channels at a time
+    last_save_time = time.time()
 
-                # Scale the visualization to range 0-255 if it's not already in that range
-                visualization = cv2.normalize(visualization, None, alpha=0.0, beta=255.0, norm_type=cv2.NORM_MINMAX,
-                                              dtype=0)
-                cv2.imshow(f'AI View Channels {i + 1}-{i + 3}', visualization)
-                cv2.waitKey(1)  # Refresh the display every 1 millisecond
+    try:
+        while cap.isOpened():
+            # Capture a frame from the video
+            ret, frame = cap.read()
+
+            if not ret:
+                break
+
+            # Preprocess the frame
+            preprocessed_frame = preprocess_frame(frame)
+
+            # Add the preprocessed frame to the frame stack
+            frame_stack.append(preprocessed_frame)
+
+            # If the frame stack is not yet full, skip this iteration
+            if len(frame_stack) < STACK_SIZE:
+                continue
+
+            # Convert the frame stack to a numpy array
+            frame_stack_np = np.array(frame_stack)
 
             # Convert the numpy array to a tensor and move it to the device
-            state_tensor = torch.from_numpy(preprocessed_screen_np).float().to(device)
+            state_tensor = torch.from_numpy(frame_stack_np).float().to(device)
 
             # Convert the tensor back to a numpy array
             state = state_tensor.cpu().numpy()
 
-            # Feed the preprocessed screen into the AI model
+            # Feed the preprocessed frame into the AI model
             predicted_action = ai.predict(state)
 
-            # Save the current screen and action to the buffer
-            replay_buffer.push(preprocessed_screen_np, predicted_action, 0, 0, False)
+            # Save the current frame and action to the buffer
+            replay_buffer.push(frame_stack_np, predicted_action, 0, 0, False)
 
             if len(replay_buffer) >= BATCH_SIZE:
                 # When replay buffer has enough experiences
@@ -93,14 +104,21 @@ def main():
 
             time.sleep(0.1)
 
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            break
+    except Exception as e:
 
-        finally:
-            cv2.destroyAllWindows()
+        print(f"An error occurred: {e}")
 
-    ai.save_model()
+    finally:
+
+        # Release the video capture and close all windows
+
+        cap.release()
+
+        cv2.destroyAllWindows()
+
+        # Save the model
+
+        ai.save_model()
 
 
 if __name__ == "__main__":
